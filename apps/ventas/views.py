@@ -1,6 +1,9 @@
+from datetime import date, timedelta
+
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Count, F, Sum
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import generics, permissions, status
@@ -8,28 +11,30 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.empleados.permissions import TieneEmpleadoActivo, rol_requerido
-from apps.productos.models import ProductoSucursal
+from apps.empleados.permissions import ROLES_SUPERVISOR, TieneEmpleadoActivo, rol_requerido
+from apps.productos.models import InsumoSucursal, ProductoSucursal
 
-from .models import DetalleVenta, Devolucion, DevolucionDetalle, Turno, Venta
+from .models import DetalleVenta, Devolucion, DevolucionDetalle, Pago, Turno, Venta
+from .recibo import construir_recibo_pdf
 from .serializers import (
     DevolucionCreateSerializer,
     DevolucionSerializer,
     PagoSerializer,
     TurnoAbrirSerializer,
     TurnoCerrarSerializer,
+    TurnoDetalleSerializer,
     TurnoSerializer,
     VentaCreateSerializer,
     VentaSerializer,
 )
 
 ROLES_VENTA = ('Vendedor', 'Cajero', 'Gerente', 'Admin')
-ROLES_SUPERVISOR = ('Gerente', 'Admin')
+ES_SUPERVISOR = [permissions.IsAuthenticated, TieneEmpleadoActivo, rol_requerido(*ROLES_SUPERVISOR)]
 
 
-def _venta_visible_para(empleado, id_venta):
+def _venta_visible_para(empleado, id_venta, queryset=None):
     """Una venta que el empleado puede operar: la propia, o cualquiera si es supervisor."""
-    qs = Venta.objects.select_related('turno')
+    qs = queryset if queryset is not None else Venta.objects.select_related('turno')
     if empleado.rol.nombre_rol not in ROLES_SUPERVISOR:
         qs = qs.filter(turno__empleado=empleado)
     return get_object_or_404(qs, pk=id_venta)
@@ -87,11 +92,18 @@ class CerrarTurnoView(APIView):
             if turno is None:
                 raise ValidationError('No tienes un turno abierto.')
 
-            total_ventas = (
-                turno.ventas.exclude(estado='cancelada').aggregate(t=Sum('total'))['t'] or 0
+            # Solo el efectivo mueve el cajon fisico; las ventas/devoluciones con
+            # tarjeta no deben afectar el efectivo esperado.
+            total_ventas_efectivo = (
+                Pago.objects.filter(venta__turno=turno, metodo_pago='efectivo')
+                .exclude(venta__estado='cancelada')
+                .aggregate(t=Sum('monto'))['t']
+                or 0
             )
-            total_devoluciones = (
-                Devolucion.objects.filter(venta__turno=turno).aggregate(t=Sum('monto'))['t'] or 0
+            total_devoluciones_efectivo = (
+                Devolucion.objects.filter(venta__turno=turno, venta__pagos__metodo_pago='efectivo')
+                .aggregate(t=Sum('monto'))['t']
+                or 0
             )
             ingresos = (
                 turno.movimientos_caja.filter(tipo='ingreso').aggregate(t=Sum('monto'))['t'] or 0
@@ -99,7 +111,9 @@ class CerrarTurnoView(APIView):
             egresos = (
                 turno.movimientos_caja.filter(tipo='egreso').aggregate(t=Sum('monto'))['t'] or 0
             )
-            monto_esperado = turno.monto_inicial + total_ventas - total_devoluciones + ingresos - egresos
+            monto_esperado = (
+                turno.monto_inicial + total_ventas_efectivo - total_devoluciones_efectivo + ingresos - egresos
+            )
 
             turno.hora_fin = timezone.localtime().time()
             turno.monto_esperado = monto_esperado
@@ -217,6 +231,20 @@ class VentaDetailView(generics.RetrieveAPIView):
         return qs.filter(turno__empleado=empleado)
 
 
+class ReciboVentaView(APIView):
+    """GET /api/ventas/<id_venta>/recibo/ - descarga el recibo de compra en PDF (no es un CFDI)."""
+
+    permission_classes = [permissions.IsAuthenticated, TieneEmpleadoActivo]
+
+    def get(self, request, id_venta):
+        base_qs = Venta.objects.select_related('turno__sucursal').prefetch_related('detalles__producto', 'pagos')
+        venta = _venta_visible_para(request.user.empleado, id_venta, queryset=base_qs)
+        pdf_bytes = construir_recibo_pdf(venta)
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="recibo-{venta.id_venta}.pdf"'
+        return response
+
+
 class PagoCreateView(generics.CreateAPIView):
     """POST /api/ventas/<id_venta>/pagos/ - registra un pago sobre una venta propia."""
 
@@ -317,3 +345,142 @@ class DevolucionCreateView(APIView):
                 stock_row.save(update_fields=['stock'])
 
         return Response(DevolucionSerializer(devolucion).data, status=status.HTTP_201_CREATED)
+
+
+class ReporteSemanaView(APIView):
+    """GET /api/reportes/semana/ - ventas de los ultimos 7 dias y productos mas vendidos, de tu sucursal."""
+
+    permission_classes = ES_SUPERVISOR
+
+    def get(self, request):
+        sucursal = request.user.empleado.sucursal
+        hoy = timezone.localdate()
+        desde = hoy - timedelta(days=6)
+
+        ventas_periodo = Venta.objects.filter(
+            turno__sucursal=sucursal, fecha__range=(desde, hoy)
+        ).exclude(estado='cancelada')
+
+        por_dia = {
+            fila['fecha']: fila
+            for fila in ventas_periodo.values('fecha').annotate(ventas=Sum('total'), tickets=Count('id_venta'))
+        }
+        dias = [
+            {
+                'fecha': str(desde + timedelta(days=offset)),
+                'ventas': por_dia.get(desde + timedelta(days=offset), {}).get('ventas') or 0,
+                'tickets': por_dia.get(desde + timedelta(days=offset), {}).get('tickets') or 0,
+            }
+            for offset in range(7)
+        ]
+
+        productos = list(
+            DetalleVenta.objects.filter(venta__in=ventas_periodo)
+            .values('producto__nombre')
+            .annotate(cantidad=Sum('unidades'), ingresos=Sum('subtotal'))
+            .order_by('-cantidad')
+        )
+        productos = [
+            {'nombre': p['producto__nombre'], 'cantidad': p['cantidad'], 'ingresos': p['ingresos']}
+            for p in productos
+        ]
+
+        return Response({'dias': dias, 'productos': productos})
+
+
+class AdminTurnoDetalleView(generics.RetrieveAPIView):
+    """GET /api/admin/turnos/<id_turno>/ - un turno de tu sucursal con todas sus ventas y devoluciones."""
+
+    serializer_class = TurnoDetalleSerializer
+    permission_classes = ES_SUPERVISOR
+    lookup_url_kwarg = 'id_turno'
+
+    def get_queryset(self):
+        sucursal = self.request.user.empleado.sucursal
+        return Turno.objects.select_related('empleado').filter(sucursal=sucursal)
+
+
+class AdminDashboardView(APIView):
+    """GET /api/admin/dashboard/?fecha=YYYY-MM-DD - libro de turnos y resumen de un dia (por defecto hoy)."""
+
+    permission_classes = ES_SUPERVISOR
+
+    def get(self, request):
+        sucursal = request.user.empleado.sucursal
+        fecha_param = request.query_params.get('fecha')
+        if fecha_param:
+            try:
+                dia = date.fromisoformat(fecha_param)
+            except ValueError:
+                raise ValidationError('Fecha invalida, usa el formato AAAA-MM-DD.')
+        else:
+            dia = timezone.localdate()
+
+        turnos_del_dia = (
+            Turno.objects.filter(sucursal=sucursal, fecha=dia)
+            .select_related('empleado')
+            .order_by('hora_inicio')
+        )
+
+        turnos_data = []
+        pendientes = []
+        for turno in turnos_del_dia:
+            ventas_turno = turno.ventas.exclude(estado='cancelada').aggregate(t=Sum('total'))['t'] or 0
+            turnos_data.append({
+                'id_turno': turno.id_turno,
+                'empleado': turno.empleado.nombre,
+                'hora_inicio': turno.hora_inicio,
+                'hora_fin': turno.hora_fin,
+                'estado': turno.estado,
+                'ventas': ventas_turno,
+                'diferencia': turno.diferencia,
+            })
+            if turno.estado == 'cerrado' and turno.diferencia:
+                texto_signo = 'faltante' if turno.diferencia < 0 else 'sobrante'
+                pendientes.append({
+                    'severidad': 'urgente' if abs(turno.diferencia) >= 50 else 'aviso',
+                    'texto': f'{turno.empleado.nombre}: {texto_signo} de {abs(turno.diferencia):.2f} en su corte.',
+                })
+
+        for stock_row in (
+            ProductoSucursal.objects.select_related('producto')
+            .filter(sucursal=sucursal, producto__estado='activo', stock__lt=F('stock_minimo'))
+        ):
+            pendientes.append({
+                'severidad': 'urgente' if stock_row.stock <= 0 else 'aviso',
+                'texto': (
+                    f'Producto: {stock_row.producto.nombre} con solo {stock_row.stock} unidades '
+                    f'en existencia (minimo {stock_row.stock_minimo}).'
+                ),
+            })
+
+        for stock_row in (
+            InsumoSucursal.objects.select_related('insumo')
+            .filter(sucursal=sucursal, insumo__estado='activo', stock__lt=F('stock_minimo'))
+        ):
+            pendientes.append({
+                'severidad': 'urgente' if stock_row.stock <= 0 else 'aviso',
+                'texto': (
+                    f'Insumo: {stock_row.insumo.nombre} por debajo del minimo '
+                    f'({stock_row.stock}/{stock_row.stock_minimo} {stock_row.insumo.unidad_medida}).'
+                ),
+            })
+
+        ventas_dia = (
+            Venta.objects.filter(turno__sucursal=sucursal, fecha=dia)
+            .exclude(estado='cancelada')
+            .aggregate(t=Sum('total'))['t']
+            or 0
+        )
+
+        return Response({
+            'fecha': dia.isoformat(),
+            'es_hoy': dia == timezone.localdate(),
+            'resumen': {
+                'ventas_dia': ventas_dia,
+                'turnos_activos': turnos_del_dia.filter(estado='abierto').count(),
+                'cortes_por_revisar': sum(1 for t in turnos_data if t['estado'] == 'cerrado' and t['diferencia']),
+            },
+            'turnos': turnos_data,
+            'pendientes': pendientes,
+        })

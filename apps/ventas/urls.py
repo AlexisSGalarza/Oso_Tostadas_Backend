@@ -10,4 +10,8 @@ urlpatterns = [
     path('ventas/<int:pk>/', views.VentaDetailView.as_view(), name='venta-detalle'),
     path('ventas/<int:id_venta>/pagos/', views.PagoCreateView.as_view(), name='venta-pago'),
     path('ventas/<int:id_venta>/devoluciones/', views.DevolucionCreateView.as_view(), name='venta-devolucion'),
+    path('ventas/<int:id_venta>/recibo/', views.ReciboVentaView.as_view(), name='venta-recibo'),
+    path('reportes/semana/', views.ReporteSemanaView.as_view(), name='reporte-semana'),
+    path('admin/dashboard/', views.AdminDashboardView.as_view(), name='admin-dashboard'),
+    path('admin/turnos/<int:id_turno>/', views.AdminTurnoDetalleView.as_view(), name='admin-turno-detalle'),
 ]

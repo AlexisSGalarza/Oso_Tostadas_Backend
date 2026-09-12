@@ -22,6 +22,22 @@ class TurnoSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class TurnoDetalleSerializer(TurnoSerializer):
+    empleado_nombre = serializers.CharField(source='empleado.nombre', read_only=True)
+    ventas = serializers.SerializerMethodField()
+
+    class Meta(TurnoSerializer.Meta):
+        fields = TurnoSerializer.Meta.fields + ['empleado_nombre', 'ventas']
+
+    def get_ventas(self, turno):
+        ventas = (
+            turno.ventas.exclude(estado='cancelada')
+            .prefetch_related('detalles__producto', 'pagos', 'devoluciones__detalles__producto')
+            .order_by('creado_en', 'id_venta')
+        )
+        return VentaSerializer(ventas, many=True).data
+
+
 class DetalleVentaInputSerializer(serializers.Serializer):
     id_producto = serializers.IntegerField()
     unidades = serializers.IntegerField(min_value=1)

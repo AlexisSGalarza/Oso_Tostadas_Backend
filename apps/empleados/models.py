@@ -15,6 +15,7 @@ class Rol(models.Model):
 
 class Empleado(models.Model):
     id_empleado = models.AutoField(primary_key=True)
+    numero_empleado = models.CharField(max_length=20, unique=True, null=True, blank=True)
     nombre = models.CharField(max_length=150)
     correo = models.CharField(max_length=150, unique=True)
     telefono = models.CharField(max_length=20, blank=True)
@@ -33,6 +34,9 @@ class Empleado(models.Model):
         null=True,
         blank=True,
     )
+    horario_dias = models.CharField(max_length=100, blank=True)
+    horario_hora_inicio = models.TimeField(null=True, blank=True)
+    horario_hora_fin = models.TimeField(null=True, blank=True)
 
     class Meta:
         db_table = 'empleado'
