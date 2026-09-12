@@ -122,6 +122,33 @@ class InventarioAdminTestCase(APITestCase):
         self.insumo.refresh_from_db()
         self.assertEqual(self.insumo.proveedor_principal_id, self.proveedor.id_proveedor)
 
+    def test_crear_insumo_nuevo_con_stock_inicial(self):
+        self.login('800002')
+        response = self.client.post(
+            '/api/admin/insumos/',
+            {
+                'nombre': 'Queso',
+                'unidad_medida': 'kg',
+                'id_proveedor': self.proveedor.id_proveedor,
+                'stock_minimo': 10,
+                'stock_inicial': 20,
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['nombre'], 'Queso')
+        self.assertEqual(response.data['stock'], 20)
+        self.assertEqual(response.data['stock_minimo'], 10)
+        self.assertEqual(response.data['id_proveedor'], self.proveedor.id_proveedor)
+
+        nuevo_insumo = Insumo.objects.get(nombre='Queso')
+        self.assertTrue(InsumoSucursal.objects.filter(insumo=nuevo_insumo, sucursal=self.sucursal).exists())
+
+    def test_vendedor_no_puede_crear_insumo(self):
+        self.login('800001')
+        response = self.client.post('/api/admin/insumos/', {'nombre': 'Queso', 'unidad_medida': 'kg'}, format='json')
+        self.assertEqual(response.status_code, 403)
+
     def test_listar_y_crear_proveedores(self):
         self.login('800002')
         listado = self.client.get('/api/proveedores/')

@@ -1,7 +1,7 @@
 from django.db.models import F
 from rest_framework import serializers
 
-from .models import InsumoSucursal, ProductoSucursal, Proveedor
+from .models import Insumo, InsumoSucursal, ProductoSucursal, Proveedor
 
 
 class ProductoSucursalSerializer(serializers.ModelSerializer):
@@ -52,6 +52,18 @@ class EntradaInsumoSerializer(serializers.Serializer):
     id_proveedor = serializers.PrimaryKeyRelatedField(
         source='proveedor', queryset=Proveedor.objects.all(), required=False, allow_null=True
     )
+
+
+class InsumoCreateSerializer(serializers.ModelSerializer):
+    id_proveedor = serializers.PrimaryKeyRelatedField(
+        source='proveedor_principal', queryset=Proveedor.objects.all(), required=False, allow_null=True
+    )
+    stock_minimo = serializers.FloatField(write_only=True, required=False, min_value=0, default=0)
+    stock_inicial = serializers.FloatField(write_only=True, required=False, min_value=0, default=0)
+
+    class Meta:
+        model = Insumo
+        fields = ['nombre', 'unidad_medida', 'id_proveedor', 'stock_minimo', 'stock_inicial']
 
 
 class ProveedorSerializer(serializers.ModelSerializer):

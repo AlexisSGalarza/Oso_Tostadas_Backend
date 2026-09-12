@@ -10,6 +10,7 @@ from .models import Insumo, InsumoSucursal, Producto, ProductoSucursal, Proveedo
 from .serializers import (
     EntradaInsumoSerializer,
     InsumoAdminSerializer,
+    InsumoCreateSerializer,
     ProduccionSerializer,
     ProductoAdminSerializer,
     ProductoSucursalSerializer,
@@ -68,11 +69,13 @@ class ProductoProduccionView(APIView):
         return Response(ProductoAdminSerializer(stock_row).data, status=status.HTTP_201_CREATED)
 
 
-class InsumoAdminListView(generics.ListAPIView):
-    """GET /api/admin/insumos/ - existencias de insumos de tu sucursal."""
+class InsumoAdminListView(generics.ListCreateAPIView):
+    """GET /api/admin/insumos/ lista existencias de insumos de tu sucursal. POST da de alta un insumo nuevo."""
 
-    serializer_class = InsumoAdminSerializer
     permission_classes = ES_SUPERVISOR
+
+    def get_serializer_class(self):
+        return InsumoCreateSerializer if self.request.method == 'POST' else InsumoAdminSerializer
 
     def get_queryset(self):
         sucursal = self.request.user.empleado.sucursal
@@ -81,6 +84,23 @@ class InsumoAdminListView(generics.ListAPIView):
             .filter(sucursal=sucursal)
             .order_by('insumo__nombre')
         )
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        stock_minimo = serializer.validated_data.pop('stock_minimo', 0)
+        stock_inicial = serializer.validated_data.pop('stock_inicial', 0)
+        insumo = serializer.save()
+
+        sucursal = request.user.empleado.sucursal
+        stock_row = InsumoSucursal.objects.create(
+            insumo=insumo, sucursal=sucursal, stock=stock_inicial, stock_minimo=stock_minimo,
+        )
+
+        registrar_auditoria(
+            request.user.empleado, 'insumo.crear', f'Dio de alta el insumo {insumo.nombre}.',
+        )
+        return Response(InsumoAdminSerializer(stock_row).data, status=status.HTTP_201_CREATED)
 
 
 class InsumoEntradaView(APIView):
