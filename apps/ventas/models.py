@@ -47,6 +47,7 @@ class MovimientoCaja(models.Model):
 class Venta(models.Model):
     id_venta = models.AutoField(primary_key=True)
     fecha = models.DateField()
+    creado_en = models.DateTimeField(auto_now_add=True, null=True)
     subtotal = models.FloatField()
     impuesto = models.FloatField(default=0)
     total = models.FloatField()
@@ -109,6 +110,7 @@ class Pago(models.Model):
 class Devolucion(models.Model):
     id_devolucion = models.AutoField(primary_key=True)
     fecha = models.DateField()
+    creado_en = models.DateTimeField(auto_now_add=True, null=True)
     monto = models.FloatField()
     venta = models.ForeignKey(
         Venta, on_delete=models.CASCADE, db_column='id_venta', related_name='devoluciones'

@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import DetalleVenta, Pago, Turno, Venta
+from .models import DetalleVenta, Devolucion, DevolucionDetalle, Pago, Turno, Venta
 
 
 class TurnoAbrirSerializer(serializers.Serializer):
@@ -40,17 +40,49 @@ class DetalleVentaSerializer(serializers.ModelSerializer):
         fields = ['id_producto', 'producto', 'unidades', 'precio_unitario', 'subtotal']
 
 
-class VentaSerializer(serializers.ModelSerializer):
-    detalles = DetalleVentaSerializer(many=True, read_only=True)
-
-    class Meta:
-        model = Venta
-        fields = ['id_venta', 'fecha', 'subtotal', 'impuesto', 'total', 'estado', 'turno', 'detalles']
-        read_only_fields = fields
-
-
 class PagoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Pago
         fields = ['id_pago', 'metodo_pago', 'monto', 'fecha', 'referencia', 'venta']
         read_only_fields = ['id_pago', 'fecha', 'venta']
+
+
+class DevolucionDetalleSerializer(serializers.ModelSerializer):
+    id_producto = serializers.IntegerField(source='producto_id', read_only=True)
+    producto = serializers.CharField(source='producto.nombre', read_only=True)
+
+    class Meta:
+        model = DevolucionDetalle
+        fields = ['id_producto', 'producto', 'cantidad']
+
+
+class DevolucionSerializer(serializers.ModelSerializer):
+    detalles = DevolucionDetalleSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Devolucion
+        fields = ['id_devolucion', 'fecha', 'creado_en', 'monto', 'venta', 'detalles']
+        read_only_fields = fields
+
+
+class DevolucionDetalleInputSerializer(serializers.Serializer):
+    id_producto = serializers.IntegerField()
+    cantidad = serializers.IntegerField(min_value=1)
+
+
+class DevolucionCreateSerializer(serializers.Serializer):
+    detalles = DevolucionDetalleInputSerializer(many=True, allow_empty=False)
+
+
+class VentaSerializer(serializers.ModelSerializer):
+    detalles = DetalleVentaSerializer(many=True, read_only=True)
+    pagos = PagoSerializer(many=True, read_only=True)
+    devoluciones = DevolucionSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Venta
+        fields = [
+            'id_venta', 'fecha', 'creado_en', 'subtotal', 'impuesto', 'total',
+            'estado', 'turno', 'detalles', 'pagos', 'devoluciones',
+        ]
+        read_only_fields = fields
