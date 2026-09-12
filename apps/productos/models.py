@@ -24,6 +24,7 @@ class ProductoSucursal(models.Model):
         'sucursales.Sucursal', on_delete=models.CASCADE, db_column='id_sucursal', related_name='stock_productos'
     )
     stock = models.IntegerField(default=0)
+    stock_minimo = models.IntegerField(default=0)
 
     class Meta:
         db_table = 'producto_sucursal'
@@ -37,6 +38,10 @@ class Insumo(models.Model):
     nombre = models.CharField(max_length=150)
     unidad_medida = models.CharField(max_length=20)
     estado = models.CharField(max_length=20, default='activo')
+    proveedor_principal = models.ForeignKey(
+        'Proveedor', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='id_proveedor_principal', related_name='insumos_principales',
+    )
 
     class Meta:
         db_table = 'insumo'
@@ -54,6 +59,7 @@ class InsumoSucursal(models.Model):
         'sucursales.Sucursal', on_delete=models.CASCADE, db_column='id_sucursal', related_name='stock_insumos'
     )
     stock = models.FloatField(default=0)
+    stock_minimo = models.FloatField(default=0)
 
     class Meta:
         db_table = 'insumo_sucursal'
@@ -82,9 +88,11 @@ class ProductoInsumo(models.Model):
 class Proveedor(models.Model):
     id_proveedor = models.AutoField(primary_key=True)
     nombre = models.CharField(max_length=150)
+    insumo_principal = models.CharField(max_length=255, blank=True)
     direccion = models.CharField(max_length=255, blank=True)
     correo = models.CharField(max_length=150, blank=True)
     telefono = models.CharField(max_length=20, blank=True)
+    proxima_entrega = models.DateField(null=True, blank=True)
     estado = models.CharField(max_length=20, default='activo')
 
     class Meta:

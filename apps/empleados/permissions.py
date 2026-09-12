@@ -1,5 +1,7 @@
 from rest_framework.permissions import BasePermission
 
+ROLES_SUPERVISOR = ('Gerente', 'Admin')
+
 
 class TieneEmpleadoActivo(BasePermission):
     message = 'Tu cuenta de empleado no existe o esta inactiva.'

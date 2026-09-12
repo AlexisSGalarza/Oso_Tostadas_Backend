@@ -7,6 +7,9 @@ class Sucursal(models.Model):
     direccion = models.CharField(max_length=255)
     telefono = models.CharField(max_length=20, blank=True)
     estado = models.CharField(max_length=20, default='activo')
+    hora_apertura = models.TimeField(null=True, blank=True)
+    hora_cierre = models.TimeField(null=True, blank=True)
+    fondo_caja_default = models.FloatField(default=500)
 
     class Meta:
         db_table = 'sucursal'
