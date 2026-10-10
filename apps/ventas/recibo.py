@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.utils import timezone
 from fpdf import FPDF
 
@@ -57,6 +58,14 @@ def construir_recibo_pdf(venta) -> bytes:
         pdf.cell(0, 4, f'Referencia: {pago.referencia}', new_x='LMARGIN', new_y='NEXT')
 
     pdf.ln(3)
+    pdf.set_font('Helvetica', '', 7)
+    pdf.multi_cell(
+        0, 3.5,
+        f'¿Necesitas factura? Entra a {settings.FRONTEND_URL.rstrip("/")}/factura '
+        f'con tu ticket #{venta.id_venta} y el total de tu compra.',
+        align='C', new_x='LMARGIN', new_y='NEXT',
+    )
+    pdf.ln(2)
     pdf.set_font('Helvetica', 'I', 6)
     pdf.multi_cell(
         0, 3, 'Este documento es un comprobante de compra y no tiene validez fiscal (no es un CFDI).',

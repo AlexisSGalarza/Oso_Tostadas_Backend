@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     'apps.productos',
     'apps.ventas',
     'apps.auditoria',
+    'apps.facturacion',
 ]
 
 MIDDLEWARE = [
@@ -149,6 +150,7 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_THROTTLE_RATES': {
         'login': '5/min',
+        'facturacion_publica': '30/min',
     },
 }
 
@@ -161,6 +163,33 @@ SIMPLE_JWT = {
 
 # Tasa de IVA aplicada a las ventas
 IVA_RATE = config('IVA_RATE', default=0.16, cast=float)
+
+# Facturacion electronica (CFDI 4.0)
+# CFDI_PAC: 'simulado' genera facturas de prueba sin validez fiscal; 'finkok' timbra con Finkok.
+CFDI_PAC = config('CFDI_PAC', default='simulado')
+CFDI_EMISOR_RFC = config('CFDI_EMISOR_RFC', default='EKU9003173C9')  # RFC de pruebas del SAT
+CFDI_EMISOR_NOMBRE = config('CFDI_EMISOR_NOMBRE', default='OSO TOSTADAS')
+CFDI_EMISOR_REGIMEN = config('CFDI_EMISOR_REGIMEN', default='601')
+CFDI_LUGAR_EXPEDICION = config('CFDI_LUGAR_EXPEDICION', default='42501')
+CFDI_CLAVE_PROD_SERV = config('CFDI_CLAVE_PROD_SERV', default='50192100')
+CFDI_CLAVE_UNIDAD = config('CFDI_CLAVE_UNIDAD', default='H87')
+CFDI_DIAS_PARA_FACTURAR = config('CFDI_DIAS_PARA_FACTURAR', default=30, cast=int)
+FINKOK_URL = config('FINKOK_URL', default='https://demo-facturacion.finkok.com')
+FINKOK_USUARIO = config('FINKOK_USUARIO', default='')
+FINKOK_PASSWORD = config('FINKOK_PASSWORD', default='')
+
+# Direccion publica del frontend; se imprime en el recibo para que el cliente facture en linea.
+FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:5173')
+
+# Correo: por defecto solo se imprime en la consola. Para enviar facturas de verdad,
+# configura un servidor SMTP con estas variables.
+EMAIL_BACKEND = config('EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend')
+EMAIL_HOST = config('EMAIL_HOST', default='localhost')
+EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
+EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
+DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='facturas@osotostadas.local')
 
 
 # CORS
