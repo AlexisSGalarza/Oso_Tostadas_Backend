@@ -10,6 +10,12 @@ urlpatterns = [
         views.ProductoProduccionView.as_view(),
         name='admin-producto-produccion',
     ),
+    path('admin/productos/etiquetas/', views.ProductoEtiquetasView.as_view(), name='admin-producto-etiquetas'),
+    path(
+        'admin/productos/<int:id_producto>/codigo-barras/',
+        views.ProductoCodigoBarrasView.as_view(),
+        name='admin-producto-codigo-barras',
+    ),
     path('admin/insumos/', views.InsumoAdminListView.as_view(), name='admin-insumos'),
     path('admin/insumos/<int:id_insumo>/entrada/', views.InsumoEntradaView.as_view(), name='admin-insumo-entrada'),
     path('proveedores/', views.ProveedorListCreateView.as_view(), name='proveedores'),

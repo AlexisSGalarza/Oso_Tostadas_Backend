@@ -1,13 +1,17 @@
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, permissions, status
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.auditoria.models import registrar as registrar_auditoria
 from apps.empleados.permissions import ROLES_SUPERVISOR, TieneEmpleadoActivo, rol_requerido
 
+from .etiquetas import construir_etiquetas_pdf
 from .models import Insumo, InsumoSucursal, Producto, ProductoSucursal, Proveedor
 from .serializers import (
+    CodigoBarrasSerializer,
     EntradaInsumoSerializer,
     InsumoAdminSerializer,
     InsumoCreateSerializer,
@@ -67,6 +71,58 @@ class ProductoProduccionView(APIView):
         stock_row.save(update_fields=['stock'])
 
         return Response(ProductoAdminSerializer(stock_row).data, status=status.HTTP_201_CREATED)
+
+
+class ProductoCodigoBarrasView(APIView):
+    """PATCH /api/admin/productos/<id_producto>/codigo-barras/ {codigo_barras} - asigna o quita el codigo."""
+
+    permission_classes = ES_SUPERVISOR
+
+    def patch(self, request, id_producto):
+        sucursal = request.user.empleado.sucursal
+        stock_row = get_object_or_404(
+            ProductoSucursal.objects.select_related('producto'), producto_id=id_producto, sucursal=sucursal
+        )
+        serializer = CodigoBarrasSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        codigo = serializer.validated_data['codigo_barras'] or None
+
+        producto = stock_row.producto
+        if codigo:
+            repetido = Producto.objects.filter(codigo_barras=codigo).exclude(pk=producto.pk).first()
+            if repetido:
+                raise ValidationError(f'Ese código ya está asignado a "{repetido.nombre}".')
+        producto.codigo_barras = codigo
+        producto.save(update_fields=['codigo_barras'])
+
+        registrar_auditoria(
+            request.user.empleado, 'producto.codigo_barras',
+            f'{"Asigno el codigo " + codigo + " a" if codigo else "Quito el codigo de barras de"} {producto.nombre}.',
+        )
+        return Response(ProductoAdminSerializer(stock_row).data)
+
+
+class ProductoEtiquetasView(APIView):
+    """GET /api/admin/productos/etiquetas/?copias=N - PDF con las etiquetas de codigo de barras para imprimir."""
+
+    permission_classes = ES_SUPERVISOR
+
+    def get(self, request):
+        sucursal = request.user.empleado.sucursal
+        try:
+            copias = min(max(int(request.query_params.get('copias', 1)), 1), 21)
+        except ValueError:
+            raise ValidationError('El número de copias no es válido.')
+        productos = list(
+            Producto.objects.filter(
+                stock_sucursales__sucursal=sucursal, estado='activo', codigo_barras__isnull=False
+            ).order_by('nombre')
+        )
+        if not productos:
+            raise ValidationError('Ningún producto tiene código de barras todavía.')
+        response = HttpResponse(construir_etiquetas_pdf(productos, copias), content_type='application/pdf')
+        response['Content-Disposition'] = 'attachment; filename="etiquetas-codigo-barras.pdf"'
+        return response
 
 
 class InsumoAdminListView(generics.ListCreateAPIView):

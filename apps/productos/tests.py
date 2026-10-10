@@ -185,3 +185,66 @@ class InventarioAdminTestCase(APITestCase):
         self.stock_insumo.save(update_fields=['stock'])
         response = self.client.get('/api/proveedores/')
         self.assertFalse(response.data[0]['urgente'])
+
+
+class CodigoBarrasTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.sucursal = Sucursal.objects.create(nombre='Centro', direccion='Av. 1')
+        User = get_user_model()
+        for numero, rol_nombre in (('800001', 'Vendedor'), ('800002', 'Admin')):
+            rol = Rol.objects.create(nombre_rol=rol_nombre)
+            user = User.objects.create_user(username=f'{numero}@demo.com', password='ClaveSegura1!')
+            Empleado.objects.create(
+                nombre=rol_nombre, numero_empleado=numero, correo=f'{numero}@demo.com',
+                fecha_ingreso=date.today(), rol=rol, sucursal=self.sucursal, usuario=user,
+            )
+        self.chico = Producto.objects.create(nombre='Chico', precio=25)
+        self.grande = Producto.objects.create(nombre='Grande', precio=50)
+        for producto in (self.chico, self.grande):
+            ProductoSucursal.objects.create(producto=producto, sucursal=self.sucursal, stock=10)
+
+    def login(self, numero):
+        login = self.client.post('/api/auth/login/', {'numero_empleado': numero, 'password': 'ClaveSegura1!'})
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+
+    def asignar(self, producto, codigo):
+        return self.client.patch(
+            f'/api/admin/productos/{producto.id_producto}/codigo-barras/', {'codigo_barras': codigo}, format='json'
+        )
+
+    def test_admin_asigna_codigo_y_el_vendedor_lo_ve_en_el_catalogo(self):
+        self.login('800002')
+        response = self.asignar(self.chico, ' 7501234567890 ')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['codigo_barras'], '7501234567890')
+
+        self.login('800001')
+        catalogo = {p['nombre']: p['codigo_barras'] for p in self.client.get('/api/productos/').data}
+        self.assertEqual(catalogo, {'Chico': '7501234567890', 'Grande': None})
+
+    def test_no_permite_repetir_codigo_ni_caracteres_raros(self):
+        self.login('800002')
+        self.asignar(self.chico, '7501234567890')
+        repetido = self.asignar(self.grande, '7501234567890')
+        self.assertEqual(repetido.status_code, 400)
+        self.assertIn('Chico', str(repetido.data))
+        self.assertEqual(self.asignar(self.grande, 'abc 123').status_code, 400)
+
+    def test_codigo_vacio_lo_quita_y_permite_varios_productos_sin_codigo(self):
+        self.login('800002')
+        self.asignar(self.chico, '111')
+        self.assertIsNone(self.asignar(self.chico, '').data['codigo_barras'])
+        self.assertIsNone(self.asignar(self.grande, '').data['codigo_barras'])
+
+    def test_vendedor_no_puede_asignar_codigos(self):
+        self.login('800001')
+        self.assertEqual(self.asignar(self.chico, '111').status_code, 403)
+
+    def test_etiquetas_en_pdf_solo_con_codigos_asignados(self):
+        self.login('800002')
+        self.assertEqual(self.client.get('/api/admin/productos/etiquetas/').status_code, 400)
+        self.asignar(self.chico, 'OSO-0001')
+        response = self.client.get('/api/admin/productos/etiquetas/?copias=3')
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.content.startswith(b'%PDF'))
