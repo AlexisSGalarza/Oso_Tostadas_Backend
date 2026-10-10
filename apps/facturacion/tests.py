@@ -112,13 +112,32 @@ class FacturacionTestCase(APITestCase):
     def test_admin_lista_facturas_de_su_sucursal(self):
         self.facturar()
         self.assertEqual(self.client.get('/api/admin/facturas/').status_code, 401)
-        self.login('vendedor@demo.com')
-        self.assertEqual(self.client.get('/api/admin/facturas/').status_code, 403)
         self.login('gerente@demo.com')
         response = self.client.get('/api/admin/facturas/')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['configuracion']['modo'], 'pruebas')
         self.assertEqual(len(response.data['facturas']), 1)
+
+    def test_personal_elige_la_compra_de_una_lista_y_la_factura_sin_escribir_el_ticket(self):
+        self.assertEqual(self.client.get('/api/facturacion/ventas/').status_code, 401)
+        self.login('vendedor@demo.com')
+        pendientes = self.client.get('/api/facturacion/ventas/').data
+        self.assertEqual([v['id_venta'] for v in pendientes], [self.id_venta])
+        self.assertEqual(pendientes[0]['detalles'][0]['producto'], 'Paquete 50')
+
+        response = self.client.post(f'/api/facturacion/ventas/{self.id_venta}/factura/', DATOS, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(self.client.get('/api/facturacion/ventas/').data, [])
+        self.assertEqual(len(self.client.get('/api/admin/facturas/').data['facturas']), 1)
+
+    def test_vendedor_solo_ve_y_factura_sus_propias_ventas(self):
+        crear_empleado('otro@demo.com', 'Vendedor', self.sucursal)
+        self.login('otro@demo.com')
+        self.assertEqual(self.client.get('/api/facturacion/ventas/').data, [])
+        ajena = self.client.post(f'/api/facturacion/ventas/{self.id_venta}/factura/', DATOS, format='json')
+        self.assertEqual(ajena.status_code, 404)
+        self.login('gerente@demo.com')
+        self.assertEqual(len(self.client.get('/api/facturacion/ventas/').data), 1)
 
     @override_settings(CFDI_PAC='finkok', FINKOK_USUARIO='', FINKOK_PASSWORD='')
     def test_finkok_sin_credenciales_responde_error_claro(self):

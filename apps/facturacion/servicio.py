@@ -78,7 +78,7 @@ def emitir_factura(id_venta: int, datos: dict) -> Factura:
 
 def enviar_por_correo(factura) -> bool:
     """Manda PDF y XML al receptor. Devuelve False si no hay un servidor de correo real configurado."""
-    if any(nombre in settings.EMAIL_BACKEND for nombre in BACKENDS_SIN_ENVIO):
+    if not factura.correo or any(nombre in settings.EMAIL_BACKEND for nombre in BACKENDS_SIN_ENVIO):
         return False
     try:
         mensaje = EmailMessage(

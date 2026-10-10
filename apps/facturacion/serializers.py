@@ -11,12 +11,11 @@ RFC_REGEX = re.compile(r'^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$')
 class DatosFiscalesSerializer(serializers.Serializer):
     rfc = serializers.CharField(max_length=13)
     razon_social = serializers.CharField(max_length=255)
-    correo = serializers.EmailField(max_length=150)
+    # Opcional: sin correo la factura solo se descarga (por ejemplo, publico en general).
+    correo = serializers.EmailField(max_length=150, required=False, allow_blank=True, default='')
     codigo_postal = serializers.RegexField(r'^\d{5}$', error_messages={'invalid': 'El código postal debe tener 5 dígitos.'})
     regimen_fiscal = serializers.ChoiceField(choices=list(REGIMENES_FISCALES))
     uso_cfdi = serializers.ChoiceField(choices=list(USOS_CFDI))
-    # Lo que el cliente ve impreso en su ticket; evita facturar tickets ajenos adivinando el numero.
-    total = serializers.FloatField(min_value=0)
 
     def validate_rfc(self, valor):
         valor = valor.strip().upper()
@@ -38,6 +37,11 @@ class DatosFiscalesSerializer(serializers.Serializer):
                 f'El régimen {datos["regimen_fiscal"]} solo admite el uso S01 (sin efectos fiscales).'
             )
         return datos
+
+
+class DatosFiscalesPublicosSerializer(DatosFiscalesSerializer):
+    # Lo que el cliente ve impreso en su ticket; evita facturar tickets ajenos adivinando el numero.
+    total = serializers.FloatField(min_value=0)
 
 
 class FacturaAdminSerializer(serializers.ModelSerializer):

@@ -145,7 +145,9 @@ El administrador ve las facturas emitidas en **Facturas**.
 | GET | `/api/publico/tickets/<folio>/?total=<total>` | Buscar el ticket (sin login; el total debe coincidir) |
 | POST | `/api/publico/tickets/<id_venta>/factura/` | Timbrar la factura con los datos fiscales |
 | GET | `/api/publico/facturas/<folio_fiscal>/<pdf\|xml>/` | Descargar PDF o XML |
-| GET | `/api/admin/facturas/` | Lista de facturas de la sucursal (Gerente/Admin) |
+| GET | `/api/facturacion/ventas/` | Compras recientes que se pueden facturar (el vendedor ve solo las suyas) |
+| POST | `/api/facturacion/ventas/<id_venta>/factura/` | Facturar una compra elegida de la lista (con sesión) |
+| GET | `/api/admin/facturas/` | Facturas emitidas (de la sucursal, o de tus ventas si eres vendedor) |
 
 ### Modos de timbrado
 
