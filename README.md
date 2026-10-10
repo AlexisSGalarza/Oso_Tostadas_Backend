@@ -120,7 +120,7 @@ python manage.py test apps
 | GET | `/api/admin/productos/`, `/api/admin/insumos/` | Inventario administrativo |
 | POST | `/api/admin/productos/<id>/produccion/`, `/api/admin/insumos/<id>/entrada/` | Movimientos de stock |
 | PATCH | `/api/admin/productos/<id>/codigo-barras/` | Asignar o quitar el código de barras de un producto |
-| GET | `/api/admin/productos/etiquetas/?copias=N` | PDF de etiquetas Code 39 para imprimir |
+| GET | `/api/admin/productos/etiquetas/?copias=N` | PDF de etiquetas para imprimir (EAN-13 o Code 128) |
 | GET/POST | `/api/proveedores/` | Proveedores |
 | GET/POST | `/api/turnos/abrir/`, `/api/turnos/cerrar/`, `/api/turnos/actual/` | Ciclo de turno |
 | GET/POST | `/api/ventas/` | Listar ventas del turno abierto / registrar una venta |

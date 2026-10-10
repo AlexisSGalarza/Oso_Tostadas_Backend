@@ -248,3 +248,28 @@ class CodigoBarrasTests(APITestCase):
         response = self.client.get('/api/admin/productos/etiquetas/?copias=3')
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.content.startswith(b'%PDF'))
+
+
+class EtiquetasFormatoTests(APITestCase):
+    """Los codigos que imprime el sistema deben salir en un formato que cualquier lector entienda."""
+
+    def test_ean13_valida_digito_verificador(self):
+        from .etiquetas import digito_verificador_ean13, es_ean13, modulos_ean13
+
+        self.assertEqual(digito_verificador_ean13('750052528499'), '0')
+        self.assertTrue(es_ean13('7500525284990'))
+        self.assertTrue(es_ean13('2000000000107'))
+        self.assertFalse(es_ean13('7500525284991'))  # digito verificador incorrecto
+        self.assertFalse(es_ean13('OSO-0010'))
+        modulos = modulos_ean13('7500525284990')
+        self.assertEqual(len(modulos), 95)
+        self.assertTrue(modulos.startswith('101') and modulos.endswith('101'))
+
+    def test_code128_para_codigos_con_letras(self):
+        from .etiquetas import modulos_code128, modulos_de
+
+        # inicio + 8 caracteres + verificador = 10 simbolos de 11 modulos, mas 13 del alto
+        self.assertEqual(len(modulos_code128('OSO-0010')), 10 * 11 + 13)
+        self.assertEqual(modulos_code128('OSO-0010')[:11], '11010010000')  # simbolo de inicio B
+        self.assertTrue(modulos_code128('OSO-0010').endswith('1100011101011'))
+        self.assertEqual(modulos_de('7500525284991'), modulos_code128('7500525284991'))  # 13 digitos que no son EAN
