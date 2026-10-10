@@ -29,7 +29,10 @@ def construir_etiquetas_pdf(productos, copias=1) -> bytes:
         pdf.set_font('Helvetica', '', 8)
         pdf.cell(ANCHO - 4, 4, f'${producto.precio:,.2f}', align='C')
         # Code 39 exige mayusculas y va entre asteriscos
-        pdf.code39(f'*{producto.codigo_barras.upper()}*', x=x + 5, y=y + 11, w=0.42, h=13)
+        codigo = f'*{producto.codigo_barras.upper()}*'
+        # En fpdf2 `w` es la barra ancha y cada caracter ocupa ~5.34 w; se ajusta para llenar la etiqueta.
+        barra = min(1.0, (ANCHO - 10) / (5.34 * len(codigo)))
+        pdf.code39(codigo, x=x + (ANCHO - 5.34 * len(codigo) * barra) / 2, y=y + 11, w=barra, h=13)
         pdf.set_xy(x + 2, y + 25)
         pdf.set_font('Courier', '', 8)
         pdf.cell(ANCHO - 4, 4, producto.codigo_barras, align='C')
