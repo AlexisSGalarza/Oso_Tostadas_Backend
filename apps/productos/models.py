@@ -7,6 +7,8 @@ class Producto(models.Model):
     descripcion = models.CharField(max_length=255, blank=True)
     precio = models.FloatField()
     estado = models.CharField(max_length=20, default='activo')
+    # Codigo impreso en el empaque (EAN-13, UPC, Code 128...). Vacio = NULL para no chocar con el unique.
+    codigo_barras = models.CharField(max_length=64, null=True, blank=True, unique=True)
 
     class Meta:
         db_table = 'producto'

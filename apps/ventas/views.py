@@ -12,7 +12,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.empleados.permissions import ROLES_SUPERVISOR, TieneEmpleadoActivo, rol_requerido
-from apps.productos.models import InsumoSucursal, ProductoSucursal
+from apps.productos.models import InsumoSucursal, ProductoInsumo, ProductoSucursal, ProveedorInsumo
 
 from .models import DetalleVenta, Devolucion, DevolucionDetalle, Pago, Turno, Venta
 from .recibo import construir_recibo_pdf
@@ -38,6 +38,25 @@ def _venta_visible_para(empleado, id_venta, queryset=None):
     if empleado.rol.nombre_rol not in ROLES_SUPERVISOR:
         qs = qs.filter(turno__empleado=empleado)
     return get_object_or_404(qs, pk=id_venta)
+
+
+def _costos_unitarios(ids_producto):
+    """Costo de insumos por paquete segun su receta. Omite los productos sin receta o con insumos sin costo."""
+    costo_insumo = {}
+    for fila in ProveedorInsumo.objects.select_related('insumo').order_by('costo'):
+        es_principal = fila.insumo.proveedor_principal_id == fila.proveedor_id
+        if fila.insumo_id not in costo_insumo or es_principal:
+            costo_insumo[fila.insumo_id] = fila.costo  # el del proveedor principal; si no hay, el mas barato
+
+    costos, incompletos = {}, set()
+    for receta in ProductoInsumo.objects.filter(producto_id__in=list(ids_producto)):
+        if receta.insumo_id not in costo_insumo:
+            incompletos.add(receta.producto_id)
+            continue
+        costos[receta.producto_id] = (
+            costos.get(receta.producto_id, 0) + receta.cantidad_requerida * costo_insumo[receta.insumo_id]
+        )
+    return {id_producto: costo for id_producto, costo in costos.items() if id_producto not in incompletos}
 
 
 class TurnoActualView(APIView):
@@ -466,21 +485,129 @@ class AdminDashboardView(APIView):
                 ),
             })
 
-        ventas_dia = (
-            Venta.objects.filter(turno__sucursal=sucursal, fecha=dia)
-            .exclude(estado='cancelada')
-            .aggregate(t=Sum('total'))['t']
-            or 0
+        ventas_qs = Venta.objects.filter(turno__sucursal=sucursal).exclude(estado='cancelada')
+        ventas_del_dia = list(ventas_qs.filter(fecha=dia).prefetch_related('detalles__producto', 'pagos'))
+        ventas_dia = sum(v.total for v in ventas_del_dia)
+        devoluciones_del_dia = Devolucion.objects.filter(venta__turno__sucursal=sucursal, fecha=dia)
+        devoluciones_dia = devoluciones_del_dia.aggregate(t=Sum('monto'))['t'] or 0
+        ventas_netas = ventas_dia - devoluciones_dia
+
+        # Mismo dia de la semana pasada: la comparacion justa para un negocio con ritmo semanal.
+        dia_comparado = dia - timedelta(days=7)
+        ventas_comparadas = (
+            (ventas_qs.filter(fecha=dia_comparado).aggregate(t=Sum('total'))['t'] or 0)
+            - (
+                Devolucion.objects.filter(venta__turno__sucursal=sucursal, fecha=dia_comparado)
+                .aggregate(t=Sum('monto'))['t'] or 0
+            )
         )
+
+        pagos = {'efectivo': 0, 'tarjeta': 0}
+        por_hora = {}
+        unidades = {}  # id_producto -> [nombre, unidades netas, ingreso sin IVA]
+        for venta in ventas_del_dia:
+            for pago in venta.pagos.all():
+                pagos[pago.metodo_pago] = pagos.get(pago.metodo_pago, 0) + pago.monto
+            if venta.creado_en:
+                hora = timezone.localtime(venta.creado_en).hour
+                celda = por_hora.setdefault(hora, {'ventas': 0, 'tickets': 0})
+                celda['ventas'] += venta.total
+                celda['tickets'] += 1
+            for detalle in venta.detalles.all():
+                fila = unidades.setdefault(detalle.producto_id, [detalle.producto.nombre, 0, 0.0, detalle.precio_unitario])
+                fila[1] += detalle.unidades
+                fila[2] += detalle.subtotal
+        for devuelto in DevolucionDetalle.objects.filter(devolucion__in=devoluciones_del_dia).select_related('producto'):
+            fila = unidades.get(devuelto.producto_id)
+            if fila:  # devolucion de una venta del mismo dia: se descuenta de lo vendido
+                fila[1] -= devuelto.cantidad
+                fila[2] -= devuelto.cantidad * fila[3]
+
+        horas_con_venta = sorted(por_hora)
+        apertura = sucursal.hora_apertura.hour if sucursal.hora_apertura else 8
+        cierre = sucursal.hora_cierre.hour if sucursal.hora_cierre else 20
+        if horas_con_venta:
+            apertura = min(apertura, horas_con_venta[0])
+            cierre = max(cierre, horas_con_venta[-1] + 1)
+        ventas_por_hora = [
+            {'hora': hora, **por_hora.get(hora, {'ventas': 0, 'tickets': 0})}
+            for hora in range(apertura, max(cierre, apertura + 1))
+        ]
+
+        desde_semana = dia - timedelta(days=6)
+        por_dia = {
+            fila['fecha']: fila
+            for fila in ventas_qs.filter(fecha__range=(desde_semana, dia))
+            .values('fecha').annotate(ventas=Sum('total'), tickets=Count('id_venta'))
+        }
+        semana = [
+            {
+                'fecha': str(desde_semana + timedelta(days=offset)),
+                'ventas': por_dia.get(desde_semana + timedelta(days=offset), {}).get('ventas') or 0,
+                'tickets': por_dia.get(desde_semana + timedelta(days=offset), {}).get('tickets') or 0,
+            }
+            for offset in range(7)
+        ]
+
+        productos_top = sorted(
+            (
+                {'nombre': nombre, 'cantidad': cantidad, 'ingresos': round(ingresos, 2)}
+                for nombre, cantidad, ingresos, _ in unidades.values() if cantidad > 0
+            ),
+            key=lambda fila: -fila['cantidad'],
+        )
+        paquetes = sum(fila['cantidad'] for fila in productos_top)
+
+        # Utilidad bruta estimada: ingreso sin IVA menos el costo de insumos segun las recetas.
+        costos_unitarios = _costos_unitarios(unidades.keys())
+        costo_estimado = None
+        utilidad_estimada = None
+        if unidades and all(id_producto in costos_unitarios for id_producto in unidades):
+            costo_estimado = round(sum(costos_unitarios[i] * fila[1] for i, fila in unidades.items()), 2)
+            utilidad_estimada = round(sum(fila[2] for fila in unidades.values()) - costo_estimado, 2)
+
+        # Existencias: cuantos dias alcanza cada producto al ritmo de los ultimos 7 dias.
+        vendido_semana = dict(
+            DetalleVenta.objects.filter(venta__in=ventas_qs.filter(fecha__range=(desde_semana, dia)))
+            .values('producto_id').annotate(u=Sum('unidades')).values_list('producto_id', 'u')
+        )
+        existencias = []
+        for stock_row in (
+            ProductoSucursal.objects.select_related('producto')
+            .filter(sucursal=sucursal, producto__estado='activo')
+        ):
+            venta_diaria = (vendido_semana.get(stock_row.producto_id) or 0) / 7
+            existencias.append({
+                'nombre': stock_row.producto.nombre,
+                'stock': stock_row.stock,
+                'stock_minimo': stock_row.stock_minimo,
+                'venta_diaria': round(venta_diaria, 1),
+                'dias_restantes': round(stock_row.stock / venta_diaria, 1) if venta_diaria > 0 else None,
+            })
+        existencias.sort(key=lambda fila: (fila['dias_restantes'] is None, fila['dias_restantes'] or 0, fila['nombre']))
 
         return Response({
             'fecha': dia.isoformat(),
             'es_hoy': dia == timezone.localdate(),
             'resumen': {
                 'ventas_dia': ventas_dia,
+                'devoluciones_dia': devoluciones_dia,
+                'ventas_netas': ventas_netas,
+                'tickets': len(ventas_del_dia),
+                'ticket_promedio': round(ventas_dia / len(ventas_del_dia), 2) if ventas_del_dia else 0,
+                'paquetes': paquetes,
+                'efectivo': pagos.get('efectivo', 0),
+                'tarjeta': pagos.get('tarjeta', 0),
+                'comparacion': {'fecha': dia_comparado.isoformat(), 'ventas_netas': ventas_comparadas},
+                'costo_estimado': costo_estimado,
+                'utilidad_estimada': utilidad_estimada,
                 'turnos_activos': turnos_del_dia.filter(estado='abierto').count(),
                 'cortes_por_revisar': sum(1 for t in turnos_data if t['estado'] == 'cerrado' and t['diferencia']),
             },
             'turnos': turnos_data,
             'pendientes': pendientes,
+            'ventas_por_hora': ventas_por_hora,
+            'semana': semana,
+            'productos_top': productos_top,
+            'existencias': existencias,
         })

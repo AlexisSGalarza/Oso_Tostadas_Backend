@@ -464,6 +464,48 @@ class ReportesYDashboardTestCase(APITestCase):
         response = self.client.get('/api/admin/dashboard/?fecha=no-es-una-fecha')
         self.assertEqual(response.status_code, 400)
 
+    def test_dashboard_resume_ventas_netas_pagos_utilidad_y_existencias(self):
+        from apps.productos.models import Insumo, ProductoInsumo, Proveedor, ProveedorInsumo
+
+        maiz = Insumo.objects.create(nombre='Maiz', unidad_medida='kg')
+        proveedor = Proveedor.objects.create(nombre='Granos')
+        ProveedorInsumo.objects.create(proveedor=proveedor, insumo=maiz, costo=20)
+        ProductoInsumo.objects.create(producto=self.producto, insumo=maiz, cantidad_requerida=2)  # $40 por paquete
+
+        id_producto = self.producto.id_producto
+        stock_inicial = ProductoSucursal.objects.get(producto=self.producto, sucursal=self.sucursal).stock
+        self.login('vendedor@demo.com')
+        self.client.post('/api/turnos/abrir/', {'monto_inicial': 500}, format='json')
+        venta = self.client.post(
+            '/api/ventas/', {'detalles': [{'id_producto': id_producto, 'unidades': 3}]}, format='json'
+        ).data
+        self.client.post(
+            f"/api/ventas/{venta['id_venta']}/pagos/", {'metodo_pago': 'efectivo', 'monto': venta['total']}, format='json'
+        )
+        self.client.post(
+            f"/api/ventas/{venta['id_venta']}/devoluciones/",
+            {'detalles': [{'id_producto': id_producto, 'cantidad': 1}]}, format='json',
+        )
+
+        self.login('admin@demo.com')
+        data = self.client.get('/api/admin/dashboard/').data
+        resumen = data['resumen']
+        self.assertAlmostEqual(resumen['ventas_dia'], 348, places=2)  # 3 x 100 + 16%
+        self.assertAlmostEqual(resumen['devoluciones_dia'], 116, places=2)
+        self.assertAlmostEqual(resumen['ventas_netas'], 232, places=2)
+        self.assertEqual(resumen['tickets'], 1)
+        self.assertEqual(resumen['paquetes'], 2)
+        self.assertAlmostEqual(resumen['efectivo'], 348, places=2)
+        self.assertEqual(resumen['tarjeta'], 0)
+        self.assertAlmostEqual(resumen['costo_estimado'], 80, places=2)  # 2 paquetes x $40
+        self.assertAlmostEqual(resumen['utilidad_estimada'], 120, places=2)  # $200 sin IVA - $80
+        self.assertEqual(sum(h['tickets'] for h in data['ventas_por_hora']), 1)
+        self.assertEqual(len(data['semana']), 7)
+        self.assertEqual(data['productos_top'][0], {'nombre': 'Chico', 'cantidad': 2, 'ingresos': 200.0})
+        existencia = next(e for e in data['existencias'] if e['nombre'] == 'Chico')
+        self.assertEqual(existencia['stock'], stock_inicial - 2)
+        self.assertIsNotNone(existencia['dias_restantes'])
+
 
 class AdminTurnoDetalleTestCase(APITestCase):
     def setUp(self):

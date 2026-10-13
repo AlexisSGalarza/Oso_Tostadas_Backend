@@ -119,6 +119,8 @@ python manage.py test apps
 | GET | `/api/productos/` | Catálogo con stock (para vender) |
 | GET | `/api/admin/productos/`, `/api/admin/insumos/` | Inventario administrativo |
 | POST | `/api/admin/productos/<id>/produccion/`, `/api/admin/insumos/<id>/entrada/` | Movimientos de stock |
+| PATCH | `/api/admin/productos/<id>/codigo-barras/` | Asignar o quitar el código de barras de un producto |
+| GET | `/api/admin/productos/etiquetas/?copias=N` | PDF de etiquetas para imprimir (EAN-13 o Code 128) |
 | GET/POST | `/api/proveedores/` | Proveedores |
 | GET/POST | `/api/turnos/abrir/`, `/api/turnos/cerrar/`, `/api/turnos/actual/` | Ciclo de turno |
 | GET/POST | `/api/ventas/` | Listar ventas del turno abierto / registrar una venta |
@@ -132,3 +134,40 @@ python manage.py test apps
 | GET | `/api/auditoria/` | Bitácora de acciones administrativas |
 
 Todos los endpoints (salvo login/refresh) requieren `Authorization: Bearer <access_token>`; los de `admin/` además requieren rol Gerente o Admin.
+
+## Facturación electrónica (CFDI 4.0)
+
+El cliente factura su compra en `<frontend>/factura` con el número y el total de su ticket.
+El administrador ve las facturas emitidas en **Facturas**.
+
+| Método | Ruta | Para qué |
+|--------|------|----------|
+| GET | `/api/publico/tickets/<folio>/?total=<total>` | Buscar el ticket (sin login; el total debe coincidir) |
+| POST | `/api/publico/tickets/<id_venta>/factura/` | Timbrar la factura con los datos fiscales |
+| GET | `/api/publico/facturas/<folio_fiscal>/<pdf\|xml>/` | Descargar PDF o XML |
+| GET | `/api/facturacion/ventas/` | Compras recientes que se pueden facturar (el vendedor ve solo las suyas) |
+| POST | `/api/facturacion/ventas/<id_venta>/factura/` | Facturar una compra elegida de la lista (con sesión) |
+| GET | `/api/admin/facturas/` | Facturas emitidas (de la sucursal, o de tus ventas si eres vendedor) |
+
+### Modos de timbrado
+
+Se elige con `CFDI_PAC` en el `.env`:
+
+- **`simulado`** (por defecto): no necesita credenciales. Genera el XML del CFDI 4.0 y el PDF
+  con un timbre de mentira. **Esas facturas no tienen validez fiscal**; sirven para probar el flujo.
+- **`finkok`**: manda el XML a Finkok (`sign_stamp`), que lo sella con el CSD cargado en la
+  cuenta de Finkok y lo timbra. `FINKOK_URL=https://demo-facturacion.finkok.com` es el ambiente de
+  pruebas de Finkok; `https://facturacion.finkok.com` es producción.
+
+### Para emitir facturas reales
+
+1. Contratar Finkok y subir el CSD (certificado y llave) del negocio a esa cuenta.
+2. En el `.env`: `CFDI_PAC=finkok`, `FINKOK_USUARIO`, `FINKOK_PASSWORD`, `FINKOK_URL` de producción.
+3. Poner los datos fiscales reales: `CFDI_EMISOR_RFC`, `CFDI_EMISOR_NOMBRE` (tal cual en la
+   constancia de situación fiscal), `CFDI_EMISOR_REGIMEN` y `CFDI_LUGAR_EXPEDICION` (código postal).
+4. Revisar con el contador `CFDI_CLAVE_PROD_SERV`, `CFDI_CLAVE_UNIDAD` y la tasa `IVA_RATE`.
+5. (Opcional) Configurar `EMAIL_*` para que la factura también llegue por correo.
+
+La integración con Finkok está escrita y probada contra respuestas simuladas, pero **no se ha
+probado contra el servicio real** porque no hay credenciales. La cancelación de facturas todavía
+no está implementada.

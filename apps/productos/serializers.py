@@ -8,10 +8,11 @@ class ProductoSucursalSerializer(serializers.ModelSerializer):
     id_producto = serializers.IntegerField(source='producto_id', read_only=True)
     nombre = serializers.CharField(source='producto.nombre', read_only=True)
     precio = serializers.FloatField(source='producto.precio', read_only=True)
+    codigo_barras = serializers.CharField(source='producto.codigo_barras', read_only=True)
 
     class Meta:
         model = ProductoSucursal
-        fields = ['id_producto', 'nombre', 'precio', 'stock']
+        fields = ['id_producto', 'nombre', 'precio', 'stock', 'codigo_barras']
 
 
 class ProductoAdminSerializer(serializers.ModelSerializer):
@@ -19,11 +20,20 @@ class ProductoAdminSerializer(serializers.ModelSerializer):
     nombre = serializers.CharField(source='producto.nombre', read_only=True)
     precio = serializers.FloatField(source='producto.precio', read_only=True)
     estado = serializers.CharField(source='producto.estado', read_only=True)
+    codigo_barras = serializers.CharField(source='producto.codigo_barras', read_only=True)
 
     class Meta:
         model = ProductoSucursal
-        fields = ['id_producto', 'nombre', 'precio', 'estado', 'stock', 'stock_minimo']
+        fields = ['id_producto', 'nombre', 'precio', 'estado', 'stock', 'stock_minimo', 'codigo_barras']
         read_only_fields = fields
+
+
+class CodigoBarrasSerializer(serializers.Serializer):
+    # Vacio quita el codigo. Solo letras, numeros y guiones: lo que emite un lector.
+    codigo_barras = serializers.RegexField(
+        r'^[A-Za-z0-9-]*$', max_length=64, allow_blank=True, trim_whitespace=True,
+        error_messages={'invalid': 'El código solo puede llevar letras, números y guiones.'},
+    )
 
 
 class ProduccionSerializer(serializers.Serializer):
