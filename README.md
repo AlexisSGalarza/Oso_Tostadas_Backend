@@ -171,3 +171,20 @@ Se elige con `CFDI_PAC` en el `.env`:
 La integración con Finkok está escrita y probada contra respuestas simuladas, pero **no se ha
 probado contra el servicio real** porque no hay credenciales. La cancelación de facturas todavía
 no está implementada.
+
+## Portal del cliente
+
+El cliente crea su cuenta en `<frontend>/cliente` (o entra con la de prueba), agrega sus tickets
+con el número y el total impresos, guarda sus datos fiscales y descarga sus facturas. Una cuenta
+de cliente no puede entrar a ninguna pantalla del personal, y un ticket solo puede pertenecer a
+una cuenta.
+
+| Método | Ruta | Para qué |
+|--------|------|----------|
+| POST | `/api/clientes/registro/` | Crear cuenta de cliente (nombre, correo, contraseña) |
+| POST | `/api/clientes/login/` | Entrar con correo y contraseña |
+| GET | `/api/clientes/me/` | Cuenta y datos fiscales guardados |
+| GET/POST | `/api/clientes/tickets/` | Sus tickets / agregar uno con `{folio, total}` |
+| POST | `/api/clientes/tickets/<id_venta>/factura/` | Facturar uno de sus tickets |
+
+Cuenta de prueba: `python manage.py crear_cliente_demo` crea `cliente@demo.com` / `Demo1234!`.
