@@ -61,8 +61,9 @@ def construir_recibo_pdf(venta) -> bytes:
     pdf.set_font('Helvetica', '', 7)
     pdf.multi_cell(
         0, 3.5,
-        f'¿Necesitas factura? Entra a {settings.FRONTEND_URL.rstrip("/")}/factura '
-        f'con tu ticket #{venta.id_venta} y el total de tu compra.',
+        f'¿Necesitas factura? Entra a {settings.FRONTEND_URL.rstrip("/")}/cliente'
+        f'?ticket={venta.id_venta}&total={venta.total:.2f} con tu cuenta, o agrega ahí '
+        f'tu ticket #{venta.id_venta} con el total de tu compra.',
         align='C', new_x='LMARGIN', new_y='NEXT',
     )
     pdf.ln(2)
